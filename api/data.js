@@ -1,6 +1,14 @@
 import { neon } from '@neondatabase/serverless';
 
-const sql = neon(process.env.DATABASE_URL);
+// The Vercel + Neon integration creates env vars with a prefix (default "STORAGE").
+// Support both common names so this works no matter how the integration was set up.
+const connectionString =
+  process.env.DATABASE_URL ||
+  process.env.STORAGE_DATABASE_URL ||
+  process.env.POSTGRES_URL ||
+  process.env.STORAGE_POSTGRES_URL;
+
+const sql = neon(connectionString);
 
 let tableReady = false;
 async function ensureTable() {
@@ -21,6 +29,9 @@ export default async function handler(req, res) {
 
   if (!expected) {
     return res.status(500).json({ error: 'Server misconfigured: APP_PASSWORD not set' });
+  }
+  if (!connectionString) {
+    return res.status(500).json({ error: 'Server misconfigured: no database connection string found in env' });
   }
   if (!password || password !== expected) {
     return res.status(401).json({ error: 'Unauthorized' });
