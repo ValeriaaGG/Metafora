@@ -1,35 +1,45 @@
 # Mis Finanzas — Metáfora
 
-App de finanzas personales (rescatada de un artifact de Claude).
+App de finanzas personales con sync entre dispositivos vía Neon (Postgres).
 
-## Cómo correrla
+## Cómo correr en local
 
 ```bash
 npm install
 npm run dev
 ```
 
-Abre `http://localhost:5173`.
+Abre `http://localhost:5173`. En local cae a localStorage si la API de Neon no está disponible.
 
-## Importar tu backup
+## Deploy en Vercel
 
-1. Abre la app.
-2. Click en el botón con ícono de **flecha hacia arriba** (Upload) en el header.
-3. Selecciona tu archivo `mis-finanzas-backup-*.json` (el que descargaste del artifact).
-4. Listo — toda tu data queda cargada.
+El proyecto es un Vite + React estándar. Vercel detecta todo solo. Solo necesitas configurar dos variables de entorno:
 
-## Exportar backup
+| Variable | De dónde sale |
+|---|---|
+| `DATABASE_URL` | La integración de Neon en Vercel la crea automáticamente |
+| `APP_PASSWORD` | La defines tú — es la contraseña para entrar a la app |
 
-Click en el botón con ícono de **flecha hacia abajo** en el header → descarga un JSON con todo.
+## Pantalla de login
 
-## Build para producción
+Al entrar pide contraseña (la que pusiste en `APP_PASSWORD`). Una vez ingresada se guarda en el navegador y no la pide más, hasta que cierres sesión con el botón de logout en el header.
 
-```bash
-npm run build
+## Importar / exportar backup
+
+- **⬆️ Upload** en el header: sube un JSON exportado previamente y reemplaza los datos.
+- **⬇️ Download** en el header: descarga todo en un JSON.
+
+## Estructura
+
+```
+api/
+  data.js              → endpoint GET/PUT que habla con Neon
+src/
+  main.jsx
+  index.css
+  App.jsx              → toda la app (login + dashboard + vistas)
 ```
 
-Los archivos quedan en `dist/`. Puedes desplegarlos en cualquier hosting estático (Vercel, Netlify, GitHub Pages, etc.).
+## Schema en Neon
 
-## Dónde se guardan los datos
-
-En `localStorage` del navegador, bajo la clave `app-data`. Si cambias de navegador o computadora, **exporta el JSON** y reimpórtalo en el otro lado.
+Una sola tabla `user_data` con una sola fila (id=1) que guarda todo el estado en una columna `JSONB`. El endpoint la crea automáticamente la primera vez que recibe una request.

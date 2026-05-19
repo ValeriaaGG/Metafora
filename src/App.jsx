@@ -1,26 +1,40 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Wallet, TrendingUp, TrendingDown, Users, Home, Bell, PieChart, CreditCard, Plus, X, Check, ArrowUpRight, ArrowDownRight, Calendar, Target, Sparkles, Heart, Trash2, Edit2, Filter, Search, ChevronRight, ChevronDown, AlertCircle, DollarSign, BarChart3, Settings, Moon, Sun, Gift, ArrowLeftRight, Banknote, Eye, EyeOff, Upload } from 'lucide-react';
+import { Wallet, TrendingUp, TrendingDown, Users, Home, Bell, PieChart, CreditCard, Plus, X, Check, ArrowUpRight, ArrowDownRight, Calendar, Target, Sparkles, Heart, Trash2, Edit2, Filter, Search, ChevronRight, ChevronDown, AlertCircle, DollarSign, BarChart3, Settings, Moon, Sun, Gift, ArrowLeftRight, Banknote, Eye, EyeOff, Upload, Lock, LogOut } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, PieChart as RePieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, AreaChart, Area } from 'recharts';
 
-// ====== STORAGE SHIM ======
-// Replaces window.storage (Claude artifact API) with localStorage so the app
-// works standalone in any browser. Same async interface so existing code works.
-if (typeof window !== 'undefined' && !window.storage) {
-  window.storage = {
-    get: async (key) => {
+// ====== STORAGE (Neon-backed) ======
+// In production, data is persisted in Neon Postgres via /api/data with a
+// password header. In local `npm run dev` (no backend), the fetches fail and
+// the app falls back to localStorage so it stays usable for development.
+function makeStorage(password) {
+  return {
+    get: async () => {
       try {
-        const value = localStorage.getItem(key);
-        return value !== null ? { value } : null;
+        const res = await fetch('/api/data', { headers: { 'x-app-password': password } });
+        if (res.status === 401) throw new Error('Unauthorized');
+        if (!res.ok) throw new Error(`API ${res.status}`);
+        const json = await res.json();
+        return json.data ? { value: JSON.stringify(json.data) } : null;
       } catch (e) {
-        return null;
+        // Fallback to localStorage for local dev when no API is reachable
+        if (e.message === 'Unauthorized') throw e;
+        const value = typeof localStorage !== 'undefined' ? localStorage.getItem('app-data') : null;
+        return value !== null ? { value } : null;
       }
     },
     set: async (key, value) => {
       try {
-        localStorage.setItem(key, value);
+        const res = await fetch('/api/data', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'x-app-password': password },
+          body: value,
+        });
+        if (res.status === 401) throw new Error('Unauthorized');
+        if (!res.ok) throw new Error(`API ${res.status}`);
         return true;
       } catch (e) {
-        return false;
+        if (e.message === 'Unauthorized') throw e;
+        try { localStorage.setItem('app-data', value); return true; } catch { return false; }
       }
     },
   };
@@ -189,7 +203,125 @@ function buildCleanData() {
   };
 }
 
-export default function FinanzasApp() {
+export default function App() {
+  const [authStatus, setAuthStatus] = useState('checking'); // 'checking' | 'unauthenticated' | 'authenticated'
+  const [password, setPassword] = useState('');
+
+  useEffect(() => {
+    const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('app-password') : null;
+    if (!stored) {
+      setAuthStatus('unauthenticated');
+      return;
+    }
+    fetch('/api/data', { headers: { 'x-app-password': stored } })
+      .then(r => {
+        if (r.ok) {
+          setPassword(stored);
+          setAuthStatus('authenticated');
+        } else if (r.status === 401) {
+          localStorage.removeItem('app-password');
+          setAuthStatus('unauthenticated');
+        } else {
+          // API not reachable (e.g., local dev). Keep working with stored password.
+          setPassword(stored);
+          setAuthStatus('authenticated');
+        }
+      })
+      .catch(() => {
+        setPassword(stored);
+        setAuthStatus('authenticated');
+      });
+  }, []);
+
+  if (authStatus === 'checking') {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="text-violet-400 text-xl">Verificando...</div>
+      </div>
+    );
+  }
+
+  if (authStatus === 'unauthenticated') {
+    return <LoginScreen onLogin={(pw) => {
+      localStorage.setItem('app-password', pw);
+      setPassword(pw);
+      setAuthStatus('authenticated');
+    }} />;
+  }
+
+  return <FinanzasApp password={password} onLogout={() => {
+    localStorage.removeItem('app-password');
+    setPassword('');
+    setAuthStatus('unauthenticated');
+  }} />;
+}
+
+function LoginScreen({ onLogin }) {
+  const [value, setValue] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!value) return;
+    setBusy(true); setError('');
+    try {
+      const res = await fetch('/api/data', { headers: { 'x-app-password': value } });
+      if (res.ok) {
+        onLogin(value);
+      } else if (res.status === 401) {
+        setError('Contraseña incorrecta');
+      } else {
+        setError(`Error del servidor (${res.status})`);
+      }
+    } catch (err) {
+      setError('No se pudo conectar al servidor');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center px-4 relative overflow-hidden">
+      <div className="absolute -top-40 -right-40 w-96 h-96 bg-violet-600/20 rounded-full blur-3xl"></div>
+      <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-pink-600/20 rounded-full blur-3xl"></div>
+      <form onSubmit={submit} className="relative bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-8 w-full max-w-md shadow-2xl">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-500 via-purple-500 to-pink-500 flex items-center justify-center shadow-lg">
+            <Sparkles className="w-6 h-6 text-white" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold">Mis Finanzas</h1>
+            <p className="text-xs text-slate-400">Ingresa tu contraseña</p>
+          </div>
+        </div>
+        <div className="relative mb-3">
+          <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+          <input
+            type="password"
+            autoFocus
+            value={value}
+            onChange={e => setValue(e.target.value)}
+            placeholder="Contraseña"
+            className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-800 border border-slate-700 outline-none focus:border-violet-500 text-base"
+          />
+        </div>
+        {error && (
+          <div className="mb-3 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm flex items-center gap-2">
+            <AlertCircle className="w-4 h-4" />{error}
+          </div>
+        )}
+        <button type="submit" disabled={busy || !value}
+          className="w-full py-3 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 text-white font-medium shadow-lg shadow-violet-500/30 transition-all hover:scale-[1.02] disabled:opacity-40 disabled:hover:scale-100">
+          {busy ? 'Verificando...' : 'Entrar'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function FinanzasApp({ password, onLogout }) {
+  const storage = useMemo(() => makeStorage(password), [password]);
   const [data, setData] = useState(DEFAULT_DATA);
   const [loaded, setLoaded] = useState(false);
   const [view, setView] = useState('dashboard');
@@ -203,7 +335,7 @@ export default function FinanzasApp() {
   useEffect(() => {
     (async () => {
       try {
-        const result = await window.storage.get('app-data');
+        const result = await storage.get('app-data');
         if (result && result.value) {
           const parsed = JSON.parse(result.value);
           if (parsed._cleanLoadV3) {
@@ -215,24 +347,32 @@ export default function FinanzasApp() {
           setData(buildCleanData());
         }
       } catch (e) {
+        if (e.message === 'Unauthorized') {
+          onLogout();
+          return;
+        }
         setData(buildCleanData());
       }
       setLoaded(true);
     })();
-  }, []);
+  }, [storage]);
 
   useEffect(() => {
     if (!loaded) return;
     setSaveStatus('saving');
     const saveWithRetry = async (attempt = 1) => {
       try {
-        const result = await window.storage.set('app-data', JSON.stringify(data));
+        const result = await storage.set('app-data', JSON.stringify(data));
         if (result) {
           setSaveStatus('saved');
         } else {
           throw new Error('Storage set returned null');
         }
       } catch (e) {
+        if (e.message === 'Unauthorized') {
+          onLogout();
+          return;
+        }
         if (attempt < 3) {
           setTimeout(() => saveWithRetry(attempt + 1), 1000 * attempt);
         } else {
@@ -498,6 +638,9 @@ export default function FinanzasApp() {
             </button>
             <button onClick={toggleTheme} className={`p-2.5 rounded-xl ${bgCard} border ${bgCardHover} transition-all`}>
               {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+            <button onClick={onLogout} className={`p-2.5 rounded-xl ${bgCard} border ${bgCardHover} transition-all`} title="Cerrar sesión">
+              <LogOut className="w-4 h-4" />
             </button>
             <button onClick={() => setShowAddTx(true)} className="flex items-center gap-2 bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 text-white px-4 py-2.5 rounded-xl font-medium shadow-lg shadow-violet-500/30 transition-all hover:scale-105">
               <Plus className="w-4 h-4" />
