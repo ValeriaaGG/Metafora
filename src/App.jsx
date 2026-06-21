@@ -435,8 +435,14 @@ function FinanzasApp({ password, onLogout }) {
       if (balances.hasOwnProperty(t.fromCard)) balances[t.fromCard] -= t.amount;
       if (balances.hasOwnProperty(t.toCard)) balances[t.toCard] += t.amount;
     });
+    Object.keys(data.otherPayments || {}).forEach(name => {
+      (data.otherPayments[name] || []).forEach(p => {
+        const toCard = p.toCard || 'bbva-deb';
+        if (balances.hasOwnProperty(toCard)) balances[toCard] += p.amount;
+      });
+    });
     return balances;
-  }, [data.cards, data.transactions, data.fedorPayments, data.parentsTransfers, data.cardPayments, data.transfers]);
+  }, [data.cards, data.transactions, data.fedorPayments, data.parentsTransfers, data.cardPayments, data.transfers, data.otherPayments]);
 
   const debitTotal = useMemo(() => {
     return data.cards.filter(c => c.type === 'debito').reduce((sum, c) => sum + (cardBalances[c.id] || 0), 0);
@@ -540,7 +546,9 @@ function FinanzasApp({ password, onLogout }) {
   const removeParentsTransfer = (id) => setData(d => ({ ...d, parentsTransfers: (d.parentsTransfers || []).filter(t => t.id !== id) }));
   const addParentsExtraDebt = (amount, date, concept) => setData(d => ({ ...d, parentsExtraDebts: [...(d.parentsExtraDebts || []), { id: Date.now().toString(), amount: parseFloat(amount), date, concept }] }));
   const removeParentsExtraDebt = (id) => setData(d => ({ ...d, parentsExtraDebts: (d.parentsExtraDebts || []).filter(e => e.id !== id) }));
-  const addOtherPayment = (name, amount, date) => setData(d => ({ ...d, otherPayments: { ...d.otherPayments, [name]: [...(d.otherPayments[name] || []), { id: Date.now().toString(), amount: parseFloat(amount), date }] } }));
+  const addOtherPayment = (name, amount, date, toCard) => setData(d => ({ ...d, otherPayments: { ...d.otherPayments, [name]: [...(d.otherPayments[name] || []), { id: Date.now().toString(), amount: parseFloat(amount), date, toCard: toCard || 'bbva-deb' }] } }));
+  const updateOtherPayment = (name, paymentId, updates) => setData(d => ({ ...d, otherPayments: { ...d.otherPayments, [name]: (d.otherPayments[name] || []).map(p => p.id === paymentId ? { ...p, ...updates } : p) } }));
+  const removeOtherPayment = (name, paymentId) => setData(d => ({ ...d, otherPayments: { ...d.otherPayments, [name]: (d.otherPayments[name] || []).filter(p => p.id !== paymentId) } }));
   const addCardPayment = (cardId, amount, date, note, fromCard) => setData(d => ({ ...d, cardPayments: { ...d.cardPayments, [cardId]: [...(d.cardPayments?.[cardId] || []), { id: Date.now().toString(), amount: parseFloat(amount), date, note, fromCard: fromCard || 'bbva-deb' }] } }));
   const removeCardPayment = (cardId, paymentId) => setData(d => ({ ...d, cardPayments: { ...d.cardPayments, [cardId]: (d.cardPayments?.[cardId] || []).filter(p => p.id !== paymentId) } }));
   const addTransfer = (fromCard, toCard, amount, date, note) => setData(d => ({ ...d, transfers: [...(d.transfers || []), { id: Date.now().toString(), fromCard, toCard, amount: parseFloat(amount), date, note }] }));
@@ -710,7 +718,7 @@ function FinanzasApp({ password, onLogout }) {
             onSetConfig={setParentsConfig} />
         )}
         {view === 'others' && (
-          <OthersView data={data} isDark={isDark} otherBalances={otherBalances} onAddPayment={addOtherPayment} />
+          <OthersView data={data} isDark={isDark} otherBalances={otherBalances} onAddPayment={addOtherPayment} onUpdatePayment={updateOtherPayment} onRemovePayment={removeOtherPayment} />
         )}
         {view === 'analysis' && (
           <AnalysisView data={data} isDark={isDark} monthSpending={monthSpending} subscriptions={subscriptions} currentMonth={currentMonth} />
@@ -1763,18 +1771,42 @@ function ParentsView({ data, isDark, parentsBalance, onAddTransfer, onRemoveTran
   );
 }
 
-function OthersView({ data, isDark, otherBalances, onAddPayment }) {
+function OthersView({ data, isDark, otherBalances, onAddPayment, onUpdatePayment, onRemovePayment }) {
   const bgCard = isDark ? 'bg-slate-900/60 backdrop-blur-xl border-slate-800' : 'bg-white border-slate-200';
   const textSecondary = isDark ? 'text-slate-400' : 'text-slate-600';
   const inputBg = isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300';
+  const debitCards = data.cards.filter(c => c.type === 'debito');
   const [activePerson, setActivePerson] = useState(null);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
+  const [paymentToCard, setPaymentToCard] = useState('bbva-deb');
+  const [editingPayment, setEditingPayment] = useState(null); // { name, payment }
+  const [editAmount, setEditAmount] = useState('');
+  const [editDate, setEditDate] = useState('');
+  const [editToCard, setEditToCard] = useState('bbva-deb');
+  const [confirmDeletePayment, setConfirmDeletePayment] = useState(null); // { name, payment }
 
   const handleAdd = (name) => {
     if (!paymentAmount) return;
-    onAddPayment(name, paymentAmount, paymentDate);
+    onAddPayment(name, paymentAmount, paymentDate, paymentToCard);
     setPaymentAmount(''); setActivePerson(null);
+  };
+
+  const startEdit = (name, payment) => {
+    setEditingPayment({ name, payment });
+    setEditAmount(payment.amount.toString());
+    setEditDate(payment.date);
+    setEditToCard(payment.toCard || 'bbva-deb');
+  };
+
+  const saveEdit = () => {
+    if (!editAmount || !editingPayment) return;
+    onUpdatePayment(editingPayment.name, editingPayment.payment.id, {
+      amount: parseFloat(editAmount),
+      date: editDate,
+      toCard: editToCard,
+    });
+    setEditingPayment(null);
   };
 
   const sortedPeople = Object.entries(otherBalances).sort(([_, a], [__, b]) => b.owes - a.owes);
@@ -1815,13 +1847,20 @@ function OthersView({ data, isDark, otherBalances, onAddPayment }) {
                       className={`w-full px-3 py-2 rounded-lg ${inputBg} border outline-none focus:border-pink-500 text-sm`} />
                     <input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)}
                       className={`w-full px-3 py-2 rounded-lg ${inputBg} border outline-none focus:border-pink-500 text-sm`} />
+                    <div>
+                      <label className={`text-xs ${textSecondary} block mb-1`}>¿A qué cuenta entró?</label>
+                      <select value={paymentToCard} onChange={e => setPaymentToCard(e.target.value)}
+                        className={`w-full px-3 py-2 rounded-lg ${inputBg} border outline-none focus:border-pink-500 text-sm`}>
+                        {debitCards.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </select>
+                    </div>
                     <div className="flex gap-2">
                       <button onClick={() => handleAdd(name)} className="flex-1 bg-emerald-500 text-white py-2 rounded-lg text-sm font-medium">Guardar</button>
                       <button onClick={() => setActivePerson(null)} className={`px-3 py-2 rounded-lg text-sm ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>Cancelar</button>
                     </div>
                   </div>
                 ) : (
-                  <button onClick={() => { setActivePerson(name); setPaymentAmount(''); }}
+                  <button onClick={() => { setActivePerson(name); setPaymentAmount(''); setPaymentToCard('bbva-deb'); setPaymentDate(new Date().toISOString().split('T')[0]); }}
                     className="w-full bg-gradient-to-r from-pink-500 to-rose-600 text-white py-2 rounded-xl text-sm font-medium hover:scale-[1.02] transition-transform">
                     Registrar pago recibido
                   </button>
@@ -1829,13 +1868,46 @@ function OthersView({ data, isDark, otherBalances, onAddPayment }) {
                 {payments.length > 0 && (
                   <div className="mt-3 pt-3 border-t" style={{ borderColor: isDark ? '#1e293b' : '#e2e8f0' }}>
                     <p className={`text-xs ${textSecondary} mb-2`}>Pagos recibidos:</p>
-                    <div className="space-y-1 max-h-24 overflow-y-auto">
-                      {payments.map(p => (
-                        <div key={p.id} className="flex justify-between text-xs">
-                          <span className={textSecondary}>{formatDate(p.date)}</span>
-                          <span className="text-emerald-400 font-medium">+{formatMoney(p.amount)}</span>
-                        </div>
-                      ))}
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                      {payments.map(p => {
+                        const toCard = data.cards.find(c => c.id === (p.toCard || 'bbva-deb'));
+                        const isEditingThis = editingPayment?.payment?.id === p.id && editingPayment?.name === name;
+                        if (isEditingThis) {
+                          return (
+                            <div key={p.id} className={`p-2 rounded-lg ${isDark ? 'bg-slate-800/50' : 'bg-slate-100'} space-y-1.5`}>
+                              <input type="number" value={editAmount} onChange={e => setEditAmount(e.target.value)}
+                                className={`w-full px-2 py-1 rounded ${inputBg} border outline-none focus:border-pink-500 text-xs`} />
+                              <input type="date" value={editDate} onChange={e => setEditDate(e.target.value)}
+                                className={`w-full px-2 py-1 rounded ${inputBg} border outline-none focus:border-pink-500 text-xs`} />
+                              <select value={editToCard} onChange={e => setEditToCard(e.target.value)}
+                                className={`w-full px-2 py-1 rounded ${inputBg} border outline-none focus:border-pink-500 text-xs`}>
+                                {debitCards.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                              </select>
+                              <div className="flex gap-1">
+                                <button onClick={saveEdit} className="flex-1 bg-emerald-500 text-white py-1 rounded text-xs font-medium">Guardar</button>
+                                <button onClick={() => setEditingPayment(null)} className={`px-2 py-1 rounded text-xs ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>X</button>
+                              </div>
+                            </div>
+                          );
+                        }
+                        return (
+                          <div key={p.id} className="flex items-center justify-between gap-2 text-xs">
+                            <div className="flex-1 min-w-0">
+                              <span className="text-emerald-400 font-medium">+{formatMoney(p.amount)}</span>
+                              <span className={`${textSecondary} ml-2`}>{formatDate(p.date)}</span>
+                              <p className={`${textSecondary} text-[10px] truncate`}>→ {toCard?.name || 'Cuenta'}</p>
+                            </div>
+                            <div className="flex gap-0.5 flex-shrink-0">
+                              <button onClick={() => startEdit(name, p)} className={`p-1 rounded ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-200'}`}>
+                                <Edit2 className="w-3 h-3" />
+                              </button>
+                              <button onClick={() => setConfirmDeletePayment({ name, payment: p })} className="p-1 rounded hover:bg-red-500/20 hover:text-red-400">
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -1856,6 +1928,12 @@ function OthersView({ data, isDark, otherBalances, onAddPayment }) {
             );
           })}
         </div>
+      )}
+      {confirmDeletePayment && (
+        <ConfirmDeleteModal isDark={isDark} title="¿Eliminar este pago?"
+          item={<><p className="font-medium">Pago de {confirmDeletePayment.name}</p><p className={`text-sm ${textSecondary}`}>{formatDate(confirmDeletePayment.payment.date)} • {formatMoney(confirmDeletePayment.payment.amount)}</p></>}
+          onCancel={() => setConfirmDeletePayment(null)}
+          onConfirm={() => { onRemovePayment(confirmDeletePayment.name, confirmDeletePayment.payment.id); setConfirmDeletePayment(null); }} />
       )}
     </div>
   );
