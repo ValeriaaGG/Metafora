@@ -204,6 +204,16 @@ function buildCleanData() {
 }
 
 export default function App() {
+  // Public shareable view for Fedor. If the URL is /fedor/<token>, we render a
+  // standalone page that shows only how much Fedor owes, no login involved.
+  const fedorMatch = typeof window !== 'undefined' && window.location.pathname.match(/^\/fedor\/([^/?#]+)/);
+  if (fedorMatch) {
+    return <FedorPublicView token={fedorMatch[1]} />;
+  }
+  return <AuthenticatedApp />;
+}
+
+function AuthenticatedApp() {
   const [authStatus, setAuthStatus] = useState('checking'); // 'checking' | 'unauthenticated' | 'authenticated'
   const [password, setPassword] = useState('');
 
@@ -316,6 +326,90 @@ function LoginScreen({ onLogin }) {
           {busy ? 'Verificando...' : 'Entrar'}
         </button>
       </form>
+    </div>
+  );
+}
+
+function FedorPublicView({ token }) {
+  const [state, setState] = useState({ status: 'loading', amount: null, updatedAt: null, error: null });
+
+  useEffect(() => {
+    fetch(`/api/fedor?token=${encodeURIComponent(token)}`)
+      .then(async r => {
+        if (r.status === 401) {
+          setState({ status: 'invalid', amount: null, updatedAt: null, error: null });
+          return;
+        }
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          setState({ status: 'error', amount: null, updatedAt: null, error: body.error || `Error ${r.status}` });
+          return;
+        }
+        const body = await r.json();
+        setState({ status: 'ok', amount: body.amount, updatedAt: body.updatedAt, error: null });
+      })
+      .catch(err => setState({ status: 'error', amount: null, updatedAt: null, error: err.message }));
+  }, [token]);
+
+  const formatUpdated = (iso) => {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      const now = new Date();
+      const diffMin = Math.floor((now - d) / 60000);
+      if (diffMin < 1) return 'hace unos segundos';
+      if (diffMin < 60) return `hace ${diffMin} min`;
+      const diffHr = Math.floor(diffMin / 60);
+      if (diffHr < 24) return `hace ${diffHr} h`;
+      const diffDay = Math.floor(diffHr / 24);
+      if (diffDay < 30) return `hace ${diffDay} día${diffDay > 1 ? 's' : ''}`;
+      return d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' });
+    } catch { return ''; }
+  };
+
+  const money = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: 0, maximumFractionDigits: 2 });
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center px-4 relative overflow-hidden">
+      <div className="absolute -top-40 -right-40 w-96 h-96 bg-violet-600/20 rounded-full blur-3xl"></div>
+      <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-pink-600/20 rounded-full blur-3xl"></div>
+      <div className="relative bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-10 w-full max-w-lg shadow-2xl text-center">
+        <div className="flex items-center justify-center gap-3 mb-8">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 via-purple-500 to-pink-500 flex items-center justify-center shadow-lg">
+            <Heart className="w-7 h-7 text-white" />
+          </div>
+        </div>
+
+        {state.status === 'loading' && (
+          <p className="text-slate-400 text-lg">Cargando...</p>
+        )}
+
+        {state.status === 'invalid' && (
+          <>
+            <p className="text-2xl font-bold text-slate-200 mb-2">Link inválido</p>
+            <p className="text-sm text-slate-500">Este enlace no es válido o expiró.</p>
+          </>
+        )}
+
+        {state.status === 'error' && (
+          <>
+            <p className="text-2xl font-bold text-red-400 mb-2">Error al cargar</p>
+            <p className="text-sm text-slate-500">{state.error}</p>
+          </>
+        )}
+
+        {state.status === 'ok' && (
+          <>
+            <p className="text-sm uppercase tracking-wider text-slate-400 mb-3">Le debes a Vale</p>
+            <p className="text-6xl font-bold tracking-tight bg-gradient-to-r from-violet-400 via-purple-400 to-pink-400 bg-clip-text text-transparent mb-4">
+              {money.format(state.amount || 0)}
+            </p>
+            <p className="text-xs text-slate-500">
+              Actualizado {formatUpdated(state.updatedAt)}
+            </p>
+          </>
+        )}
+      </div>
     </div>
   );
 }

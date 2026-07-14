@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "source": "/fedor/:token", "destination": "/index.html" }
+  ]
+}
