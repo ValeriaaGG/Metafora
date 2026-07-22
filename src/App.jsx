@@ -400,7 +400,7 @@ function FedorPublicView({ token }) {
 
         {state.status === 'ok' && (
           <>
-            <p className="text-sm uppercase tracking-wider text-slate-400 mb-3">Le debes a Vale</p>
+            <p className="text-sm uppercase tracking-wider text-slate-400 mb-3">Lera's Balance</p>
             <p className="text-6xl font-bold tracking-tight bg-gradient-to-r from-violet-400 via-purple-400 to-pink-400 bg-clip-text text-transparent mb-4">
               {money.format(state.amount || 0)}
             </p>
