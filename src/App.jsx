@@ -2856,12 +2856,27 @@ function TransactionModal({ data, isDark, allResponsibles, editingTx, onClose, o
 
   const myCards = data.cards.filter(c => c.type !== 'fedor');
 
+  // If we're editing a transaction that was paid with Fedor's account, `card`
+  // initializes to 'fedor-cuenta'. When the user then unchecks "Pagado con
+  // cuenta de Fedor", the dropdown shows non-fedor cards but `card` state is
+  // still stale — so on submit we'd write the old value back. This resets it
+  // to a valid non-fedor card whenever the checkbox flips off.
+  useEffect(() => {
+    if (!paidByFedor && card === 'fedor-cuenta') {
+      setCard(myCards[0]?.id);
+    }
+  }, [paidByFedor]);
+
   const handleSubmit = () => {
     if (!amount || !concept) {
       alert('Por favor completa al menos la cantidad y el concepto');
       return;
     }
-    const finalCard = paidByFedor ? 'fedor-cuenta' : card;
+    // Defensive: guarantee card is consistent with paidByFedor, no matter
+    // what the state history was.
+    const finalCard = paidByFedor
+      ? 'fedor-cuenta'
+      : (card && card !== 'fedor-cuenta' ? card : myCards[0]?.id);
     const tx = {
       type, isTransfer, card: finalCard, amount: parseFloat(amount), concept, date,
       category: type === 'gasto' ? category : null,
